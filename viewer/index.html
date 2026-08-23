@@ -38,7 +38,7 @@
           <output id="clock" class="clock">--:--</output>
           <span id="visible-count" class="count">0 件</span>
         </div>
-        <input id="time-slider" class="slider" type="range" min="0" max="287" step="1" value="0"
+        <input id="time-slider" class="slider" type="range" min="0" max="1440" step="1" value="0"
                aria-label="時刻スライダー" />
         <div class="slider-scale" aria-hidden="true">
           <span>0時</span><span>6時</span><span>12時</span><span>18時</span><span>24時</span>
@@ -60,6 +60,7 @@
       <div class="field">
         <label class="field-label" for="speed-select">再生速度</label>
         <select id="speed-select" class="select">
+          <option value="1">とても遅い（1分/コマ）</option>
           <option value="2">遅い（2分/コマ）</option>
           <option value="5" selected>標準（5分/コマ）</option>
           <option value="15">速い（15分/コマ）</option>

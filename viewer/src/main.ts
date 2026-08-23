@@ -37,8 +37,17 @@ const PMTILES_BASE = (() => {
   const withSlash = raw.endsWith('/') ? raw : raw + '/'
   return new URL(withSlash, document.baseURI).href.replace(/\/$/, '')
 })()
-const SLICE_MINUTES = 5
-const SLOTS_PER_DAY = 288
+/**
+ * 時刻カーソルは **分単位**で持つ（配信スライスの5分単位ではない）。
+ *
+ * `epoch_ms` は1秒未満まで持っているので、カーソルを5分刻みにする理由はない。
+ * 5分刻みだったころは「1分/コマ」を選んでも
+ * `round(1/5) = 0` → 最低1枠に丸められて「5分/コマ」と同じ動きになっていた。
+ *
+ * 5分という単位は「配信スライスのカバレッジ（288枠）」の話であって、
+ * 表示の時間解像度とは別物。混ぜないこと。
+ */
+const MINUTES_PER_DAY = 24 * 60
 
 // 背景地図(pmtiles://)と落雷タイル(pmtiles://)の両方で必要
 maplibregl.addProtocol('pmtiles', new Protocol().tile)
@@ -52,8 +61,8 @@ const $ = <T extends HTMLElement>(id: string): T => {
 interface State {
   index: Index
   day: DayEntry
-  /** 0..287 の枠番。JST 00:00 起点で 5 分刻み */
-  slot: number
+  /** JST 00:00 からの経過分（0..1440）。時刻カーソルの位置 */
+  minute: number
   windowMinutes: number
   stepMinutes: number
   activeTypes: Set<number>
@@ -75,12 +84,12 @@ function dayStartMs(date: string): number {
 }
 
 function cursorMs(): number {
-  return dayStartMs(state.day.date) + (state.slot + 1) * SLICE_MINUTES * 60 * 1000
+  return dayStartMs(state.day.date) + state.minute * 60 * 1000
 }
 
 function dayRange(): [number, number] {
   const start = dayStartMs(state.day.date)
-  return [start, start + SLOTS_PER_DAY * SLICE_MINUTES * 60 * 1000]
+  return [start, start + MINUTES_PER_DAY * 60 * 1000]
 }
 
 function tileUrl(day: DayEntry): string {
@@ -120,10 +129,10 @@ function refreshFilter(): void {
 }
 
 function updateClock(): void {
-  const end = (state.slot + 1) * SLICE_MINUTES
-  const hh = String(Math.floor(end / 60) % 24).padStart(2, '0')
-  const mm = String(end % 60).padStart(2, '0')
-  $('clock').textContent = end === SLOTS_PER_DAY * SLICE_MINUTES ? '24:00' : hh + ':' + mm
+  const m = state.minute
+  const hh = String(Math.floor(m / 60) % 24).padStart(2, '0')
+  const mm = String(m % 60).padStart(2, '0')
+  $('clock').textContent = m === MINUTES_PER_DAY ? '24:00' : hh + ':' + mm
 }
 
 /**
@@ -150,11 +159,10 @@ function updateVisibleCount(): void {
 // ---- 再生 ----
 
 function tick(): void {
-  const step = Math.max(1, Math.round(state.stepMinutes / SLICE_MINUTES))
-  state.slot += step
-  if (state.slot >= SLOTS_PER_DAY) state.slot = 0
+  state.minute += state.stepMinutes
+  if (state.minute > MINUTES_PER_DAY) state.minute = 0
   const slider = $('time-slider') as HTMLInputElement
-  slider.value = String(state.slot)
+  slider.value = String(state.minute)
   refreshLayers()
 }
 
@@ -236,7 +244,7 @@ function updateLegend(): void {
 async function selectDay(day: DayEntry): Promise<void> {
   state.day = day
   state.activeTypes = new Set(Object.keys(day.types ?? {}).map(Number))
-  state.slot = 0
+  state.minute = 0
   const slider = $('time-slider') as HTMLInputElement
   slider.value = '0'
 
@@ -295,7 +303,7 @@ async function boot(): Promise<void> {
   state = {
     index,
     day: latest,
-    slot: 0,
+    minute: 0,
     windowMinutes: 30,
     stepMinutes: 5,
     activeTypes: new Set(Object.keys(latest.types ?? {}).map(Number)),
@@ -347,7 +355,7 @@ async function boot(): Promise<void> {
 
   $('play-btn').addEventListener('click', () => setPlaying(!state.playing))
   $('time-slider').addEventListener('input', (e) => {
-    state.slot = +(e.target as HTMLInputElement).value
+    state.minute = +(e.target as HTMLInputElement).value
     setPlaying(false)
     refreshLayers()
   })
