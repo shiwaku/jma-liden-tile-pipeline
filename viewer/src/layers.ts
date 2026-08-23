@@ -31,6 +31,12 @@ export const SOURCE_ID = 'liden'
  *
  * `circle-blur` は 1 を超えてよい（2.5 で外周まで大きくにじむ）。
  * 芯だけ白にして色は外側2層に載せる。落雷は「白く光る中心＋色の暈」に見える。
+ *
+ * **半径は低ズーム側を持ち上げた曲線にする。** 全体を一律に何倍しても
+ * 全国表示（ZL4〜5）ではほとんど変わらない（実測: 2.4倍にしても画面の
+ * 明るさ合計が 2.5% しか増えない）。効くのは ZL3 側の値。
+ * ただし上げすぎると暈が融合して密集部が1つの塊になり、個々の落雷が消える
+ * （ZL3 で glow=14 まで上げると瀬戸内が塊になった）。
  */
 export const GLOW_LAYERS: Array<{
   id: string
@@ -40,9 +46,9 @@ export const GLOW_LAYERS: Array<{
   base: number
   color: 'age' | 'white'
 }> = [
-  { id: 'liden-glow', radius: [[3, 5], [7, 12], [12, 26]], blur: 2.5, base: 0.5, color: 'age' },
-  { id: 'liden-mid', radius: [[3, 2.5], [7, 6], [12, 12]], blur: 1.5, base: 0.8, color: 'age' },
-  { id: 'liden-core', radius: [[3, 0.8], [7, 1.6], [12, 3]], blur: 0, base: 1, color: 'white' },
+  { id: 'liden-glow', radius: [[3, 11], [7, 18], [12, 36]], blur: 2.5, base: 0.5, color: 'age' },
+  { id: 'liden-mid', radius: [[3, 5.5], [7, 9], [12, 17]], blur: 1.5, base: 0.8, color: 'age' },
+  { id: 'liden-core', radius: [[3, 2], [7, 3], [12, 5]], blur: 0, base: 1, color: 'white' },
 ]
 
 /** 当たり判定に使う層。いちばん大きいので拾いやすい。 */
