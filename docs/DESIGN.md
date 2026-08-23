@@ -100,6 +100,17 @@ raw はいつ消してもよいキャッシュなので、raw を基準にする
 パス変換はリポジトリ直下を一度だけ `wslpath` で引いて相対パスを繋ぐ。
 `/mnt/c` 固定を前提にしない。
 
+### tippecanoe のバージョンはローカルと CI で違う
+
+ローカル（WSL）は **v2.80.0** だが、これは `main` からのビルドで
+**`2.80.0` というタグは存在しない**（`felt/tippecanoe` の最新リリースタグは
+`2.79.0`）。CI で `-b 2.80.0` を指定すると
+`fatal: Remote branch 2.80.0 not found in upstream origin` で落ちる（実際に踏んだ）。
+
+CI は `2.79.0` を固定でビルドする。**バージョン差は問題にならない**——
+`build.py` は出力の中身（マジックバイト）で mbtiles / PMTiles を判定するので、
+どちらの挙動でも通る。
+
 ### tippecanoe は `.pmtiles` を指定しても mbtiles を書く
 
 2.80 で確認（先頭バイトが `SQLite format 3`）。`build.py` は出力の
