@@ -333,6 +333,9 @@ async function boot(): Promise<void> {
   $('collapse-btn').addEventListener('click', () => {
     const body = $('panel-body')
     body.hidden = !body.hidden
+    // パネルは全高固定なので、畳むときは .collapsed を付けて高さの固定を解除する。
+    // hidden だけだと中身が消えた全高の板が残る。
+    $('panel').classList.toggle('collapsed', body.hidden)
     $('collapse-btn').textContent = body.hidden ? '▾' : '▴'
   })
   $('collapse-btn').textContent = '▴'

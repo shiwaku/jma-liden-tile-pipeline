@@ -54,21 +54,36 @@ body {
 }
 
 /* ---- パネル ---- */
+/* 画面左端に貼り付く全高サイドバー。姉妹リポジトリ
+   jartic-traffic-signal-cycle-converter の viewer/src/style.css に合わせている。
+   浮きカード（top/left に余白＋角丸）にすると、地図の左上——ちょうど見たい
+   ところ——が余白で欠ける。 */
 .panel {
   position: absolute;
-  top: 16px;
-  left: 16px;
+  top: 0;
+  left: 0;
   z-index: 2;
-  width: 288px;
-  max-width: calc(100vw - 32px);
-  background: var(--surface);
-  backdrop-filter: blur(16px) saturate(1.4);
-  -webkit-backdrop-filter: blur(16px) saturate(1.4);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  max-width: 88vw;
+  /* 常に全高で固定。top:0 + bottom:0 で確実に画面の縦いっぱいにする
+     （height:100dvh の dvh 単位に頼らない）。height:auto にすると内容が
+     画面より低いときパネルが縮み、上半分だけになったり切替で下端が動く。 */
+  bottom: 0;
+  /* backdrop-filter（すりガラス）は使わない。実GPUでの合成不具合により、
+     内部スクロールを持つパネルで描画が破綻することがある。 */
+  background: var(--surface-solid);
+  border-right: 1px solid var(--line);
+  border-radius: 0;
   box-shadow: var(--shadow);
   overflow: hidden;
-  transition: box-shadow 0.2s ease;
+}
+
+.panel.collapsed {
+  /* 畳んだらヘッダの高さだけに（全高固定を解除） */
+  bottom: auto;
+  height: auto;
 }
 
 .panel-head {
@@ -78,6 +93,7 @@ body {
   gap: 8px;
   padding: 12px 12px 12px 14px;
   border-bottom: 1px solid var(--line);
+  flex: none;
 }
 
 .brand {
@@ -129,8 +145,12 @@ body {
   padding: 14px;
   display: grid;
   gap: 16px;
-  max-height: calc(100vh - 120px);
+  /* 親が全高固定なので、余った高さをここが受けて内部スクロールする。
+     max-height を自前で計算しない（ヘッダ高の変化でずれる） */
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  align-content: start;
 }
 
 .panel.collapsed .panel-body {
@@ -409,18 +429,48 @@ body {
 
 /* ---- レスポンシブ（モバイルはボトムシート） ---- */
 @media (max-width: 640px) {
+  /* 狭い画面では画面端まで使うボトムシートにする。浮かせて角丸を付けると
+     地図の見える面積が減るだけなので、端に貼り付ける（参考: 姉妹リポジトリ
+     jartic-traffic-signal-cycle-converter）。 */
   .panel {
     top: auto;
-    bottom: 12px;
-    left: 12px;
-    right: 12px;
+    left: 0;
+    right: 0;
+    bottom: 0;
     width: auto;
     max-width: none;
-    border-radius: 18px;
+    height: auto;
+    max-height: 62dvh;
+    border: none;
+    border-top: 1px solid var(--line);
+    border-radius: 0;
+  }
+
+  /* デスクトップ用の .panel.collapsed { bottom: auto } を打ち消す。
+     モバイルは top:auto なので bottom まで auto になると
+     パネルが画面最上部へ飛ぶ。 */
+  .panel.collapsed {
+    bottom: 0;
+    max-height: none;
+  }
+
+  .panel-head {
+    padding: 14px 12px;
   }
 
   .panel-body {
-    max-height: 46vh;
+    padding: 12px;
+  }
+
+  /* タッチ操作しやすいよう当たり判定を拡大 */
+  .toggle {
+    padding: 9px 8px;
+  }
+
+  /* 畳んだパネルのヘッダ分だけ地図コントロールを持ち上げる */
+  .maplibregl-ctrl-bottom-right,
+  .maplibregl-ctrl-bottom-left {
+    margin-bottom: 64px;
   }
 }
 

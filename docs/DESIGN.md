@@ -107,6 +107,31 @@ raw はいつ消してもよいキャッシュなので、raw を基準にする
 既に PMTiles ならそのまま使う。バージョンによって挙動が違うので、
 拡張子でもバージョン番号でもなく中身で判断する。
 
+## パネルは画面左端に貼り付ける
+
+**浮きカードにしない。** `top:16px / left:16px / border-radius:16px` の
+フローティングパネルは、地図の左上——ちょうど見たいところ——を余白で削るだけで
+得がない。左端に貼り付いた全高サイドバーにする。
+
+- `top:0; left:0; bottom:0; border-radius:0; border-right`。**`height:100dvh` に
+  頼らず `top:0` + `bottom:0`** で縦いっぱいにする（`height:auto` だと内容が
+  画面より低いときパネルが縮み、切替で下端が動く）
+- **`backdrop-filter`（すりガラス）は使わない。** 実GPUでの合成不具合により、
+  内部スクロールを持つパネルで描画が破綻することがある
+- 畳むときは `.panel.collapsed` を付けて `bottom:auto; height:auto` に戻す。
+  **`hidden` だけだと中身が消えた全高の板が残る**（実際に踏んだ）
+- 狭い画面（`max-width:640px`）は画面端まで使うボトムシート
+  （`left:0; right:0; bottom:0; max-height:62dvh; border-radius:0`）。
+  ここで `.panel.collapsed { bottom: 0 }` を **明示的に打ち消す**必要がある。
+  モバイルは `top:auto` なので、デスクトップ用の `bottom:auto` が効くと
+  パネルが画面最上部へ飛ぶ
+
+構成は姉妹リポジトリ
+[`jartic-traffic-signal-cycle-converter`](https://github.com/shiwaku/jartic-traffic-signal-cycle-converter)
+の `viewer/src/style.css` に合わせている。
+（`railway-frequency-converter` 側は浮きカードなので、そちらから CSS を
+流用すると余白が付いてくる。**最初それで作ってしまった。**）
+
 ## 発光表現と再生の作り
 
 姉妹リポジトリ
