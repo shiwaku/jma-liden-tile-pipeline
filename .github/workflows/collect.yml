@@ -3,6 +3,11 @@ name: collect liden
 # **手動実行のみ。** このリポジトリは「普段は溜めない。雷雨のときに最新を見る」
 # 運用を選んでいるため、定期実行は入れていない。
 #
+# 雷雨に気づいたらこのワークフローを Run workflow するだけで、
+# 取得 → アーカイブのコミット → PMTiles 生成 → 公開サイトの更新 まで通る。
+# ローカルPCも WSL の tippecanoe も要らない（スマホからでも実行できる）。
+# ローカルで完結させたいときは refresh.ps1 を使う。
+#
 # 定期収集に切り替えたくなったら下の schedule のコメントを外す。配信は約5日の
 # ローリングウィンドウなので、6時間ごとで取りこぼさない（5分ごとに回す必要はない）。
 # ただし有効にすると archive/ が毎日 1〜3 MB ずつ増え、コミットが積まれる。
@@ -20,6 +25,11 @@ on:
         default: '3'
       commit_archive:
         description: 'アーカイブをコミットする'
+        type: boolean
+        required: false
+        default: true
+      deploy_pages:
+        description: '公開サイト(GitHub Pages)も更新する'
         type: boolean
         required: false
         default: true
@@ -115,3 +125,36 @@ jobs:
             dist/*.pmtiles
             dist/index.json
           retention-days: 14
+
+      # ここまでで dist/ にタイルが揃っている。公開サイトも同じ実行で更新する。
+      # **これが無いと「手動実行しても公開サイトは古いまま」になる。**
+      - uses: actions/setup-node@v4
+        if: ${{ inputs.deploy_pages }}
+        with:
+          node-version: '20'
+
+      - name: ビューアをビルド
+        if: ${{ inputs.deploy_pages }}
+        run: |
+          cd viewer
+          npm ci
+          npm run build
+
+      - name: gh-pages へデプロイ
+        if: ${{ inputs.deploy_pages }}
+        run: |
+          # Pages の配信元は gh-pages ブランチ（Settings > Pages）。
+          # PMTiles を積み上げるとリポジトリが膨らむので履歴は保持せず force push する。
+          STAGE="$(mktemp -d)"
+          cp -r viewer/dist/. "$STAGE/"
+          mkdir -p "$STAGE/pmtiles"
+          cp dist/*.pmtiles dist/index.json "$STAGE/pmtiles/"
+          touch "$STAGE/.nojekyll"
+          echo "公開サイズ: $(du -sh "$STAGE" | cut -f1)"
+          cd "$STAGE"
+          git init -q
+          git checkout -q -b gh-pages
+          git add -A
+          git -c user.name="github-actions[bot]"               -c user.email="41898282+github-actions[bot]@users.noreply.github.com"               commit -q -m "deploy $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q --force             "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"             gh-pages
+          echo "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/ を更新した"
