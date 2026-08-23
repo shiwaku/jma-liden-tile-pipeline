@@ -135,7 +135,9 @@ jobs:
       - uses: actions/setup-node@v4
         if: ${{ inputs.deploy_pages }}
         with:
-          node-version: '20'
+          # ローカルも 22 系。20 だと maplibre-gl の依存が EBADENGINE を出す
+          # （@mapbox/jsonlint-lines-primitives が node>=22 を要求）。
+          node-version: '22'
 
       - name: ビューアをビルド
         if: ${{ inputs.deploy_pages }}
