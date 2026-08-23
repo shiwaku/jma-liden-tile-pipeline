@@ -100,6 +100,19 @@ raw はいつ消してもよいキャッシュなので、raw を基準にする
 パス変換はリポジトリ直下を一度だけ `wslpath` で引いて相対パスを繋ぐ。
 `/mnt/c` 固定を前提にしない。
 
+### `@types/node` は依存に明示する
+
+`viewer/vite.config.ts` は `node:fs` / `node:path` / `node:url` を使うので
+`@types/node` が要る。**これを宣言していなくてもローカルでは通ってしまう** ——
+TypeScript は親ディレクトリを遡って `node_modules/@types` を探すため、
+ホームディレクトリの無関係なインストール（`~/node_modules/@types/node`）を
+拾っていた。CI にはそれが無いので `TS2307: Cannot find module 'node:fs'` で
+落ちる（実際に踏んだ。`tsc --listFiles` で参照元を確認できる）。
+
+`devDependencies` に `@types/node` を入れ、`tsconfig.json` の `types` にも
+`"node"` を明示してある。**「ローカルで通る」は依存が宣言されている証拠に
+ならない。**
+
 ### tippecanoe のバージョンはローカルと CI で違う
 
 ローカル（WSL）は **v2.80.0** だが、これは `main` からのビルドで
