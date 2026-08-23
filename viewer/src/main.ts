@@ -9,18 +9,34 @@ import {
   addLidenLayers,
   ageColor,
   ageOpacity,
-  buildFilter,
+  COUNT_LAYER,
+  GLOW_LAYERS,
   groupTypes,
   legendHtml,
-  LAYER_DOT,
-  LAYER_GLOW,
-  SOURCE_ID,
+  PICK_LAYER,
+  removeLidenLayers,
+  typeFilter,
   type DayEntry,
   type Index,
 } from './layers'
 
-// PMTiles の配置先。dev では vite.config.ts のミドルウェアが /pmtiles で配る。
-const PMTILES_BASE = import.meta.env.VITE_PMTILES_BASE ?? '/pmtiles'
+/**
+ * PMTiles の配置先。dev では vite.config.ts のミドルウェアが `/pmtiles` で配る。
+ *
+ * **既定を絶対パス `/pmtiles` にしてはいけない。** GitHub Pages のプロジェクトサイトは
+ * `https://<user>.github.io/<repo>/` に載るので、`/pmtiles` は
+ * `https://<user>.github.io/pmtiles` を指してしまい全部 404 になる（実際に踏んだ）。
+ * 相対の `./pmtiles` を `document.baseURI` で絶対化して使う。
+ *
+ * ここで `new URL()` を使うのは安全。テンプレート（`{z}` など）を含まないので、
+ * `layers.ts` のタイルURLテンプレートで `new URL()` を避けている理由
+ * （`{z}` が %7Bz%7D にエンコードされる）は当てはまらない。
+ */
+const PMTILES_BASE = (() => {
+  const raw = import.meta.env.VITE_PMTILES_BASE ?? './pmtiles'
+  const withSlash = raw.endsWith('/') ? raw : raw + '/'
+  return new URL(withSlash, document.baseURI).href.replace(/\/$/, '')
+})()
 const SLICE_MINUTES = 5
 const SLOTS_PER_DAY = 288
 
@@ -73,21 +89,34 @@ function tileUrl(day: DayEntry): string {
 
 // ---- 描画の更新 ----
 
+/**
+ * 時刻カーソルの反映。**paint だけを差し替える。**
+ * `setFilter` はタイルの再評価を起こすので再生ループでは触らない
+ * （種別の切替だけが filter を触る → `refreshFilter()`）。
+ */
 function refreshLayers(): void {
-  if (!map.getLayer(LAYER_DOT)) return
+  if (!map.getLayer(COUNT_LAYER)) return
   const cursor = cursorMs()
   const windowMs = state.windowMinutes * 60 * 1000
-  const filter = buildFilter(cursor, windowMs, state.activeTypes, dayRange())
+  const color = ageColor(cursor, windowMs)
 
-  for (const id of [LAYER_GLOW, LAYER_DOT]) {
-    map.setFilter(id, filter)
+  for (const s of GLOW_LAYERS) {
+    // 芯を白にするのはダークのときだけ。**ライトの淡色地図では白は背景に溶ける**ので、
+    // 芯にも経過時間の色を載せて点を見えるようにする。
+    const c = s.color === 'white' && state.theme === 'light' ? color : (s.color === 'white' ? '#ffffff' : color)
+    map.setPaintProperty(s.id, 'circle-color', c)
+    map.setPaintProperty(s.id, 'circle-opacity', ageOpacity(cursor, windowMs, s.base))
   }
-  map.setPaintProperty(LAYER_DOT, 'circle-color', ageColor(cursor, windowMs))
-  map.setPaintProperty(LAYER_DOT, 'circle-opacity', ageOpacity(cursor, windowMs))
-  map.setPaintProperty(LAYER_GLOW, 'circle-color', ageColor(cursor, windowMs))
 
   updateClock()
   updateVisibleCount()
+}
+
+/** 種別の絞り込み。トグル操作のときだけ呼ぶ。 */
+function refreshFilter(): void {
+  if (!map.getLayer(COUNT_LAYER)) return
+  const filter = typeFilter(state.activeTypes)
+  for (const s of GLOW_LAYERS) map.setFilter(s.id, filter)
 }
 
 function updateClock(): void {
@@ -98,13 +127,23 @@ function updateClock(): void {
 }
 
 /**
- * 画面内の可視件数。`queryRenderedFeatures` はタイル境界で同じ点が
- * 二重に返ることがあるので `src_id` で数え直す。
+ * 画面内の可視件数。
+ *
+ * - `queryRenderedFeatures` はタイル境界で同じ点を二重に返すので `src_id` で数え直す
+ * - **不透明度0で消した点も「描画済み」として返ってくる**ので、時刻の窓は
+ *   ここで JS 側で絞る（filter に時刻を入れていないため）
  */
 function updateVisibleCount(): void {
-  if (!map.getLayer(LAYER_DOT) || !map.isStyleLoaded()) return
-  const feats = map.queryRenderedFeatures({ layers: [LAYER_DOT] })
-  const ids = new Set(feats.map((f) => f.properties?.src_id as string))
+  if (!map.getLayer(COUNT_LAYER) || !map.isStyleLoaded()) return
+  const cursor = cursorMs()
+  const windowMs = state.windowMinutes * 60 * 1000
+  const from = windowMs <= 0 ? dayRange()[0] : cursor - windowMs
+  const ids = new Set<string>()
+  for (const f of map.queryRenderedFeatures({ layers: [COUNT_LAYER] })) {
+    const p = f.properties ?? {}
+    const e = p.epoch_ms as number
+    if (e > from && e <= cursor) ids.add(p.src_id as string)
+  }
   $('visible-count').textContent = ids.size.toLocaleString('ja-JP') + ' 件'
 }
 
@@ -165,7 +204,8 @@ function buildTypeToggles(): void {
         if (input.checked) state.activeTypes.add(c)
         else state.activeTypes.delete(c)
       }
-      refreshLayers()
+      refreshFilter()
+      updateVisibleCount()
     })
     // 流用した CSS は input を隠して .switch を見せる構造。
     // .switch を出さないとチェックボックスが一切見えなくなる（実際に踏んだ）。
@@ -200,14 +240,13 @@ async function selectDay(day: DayEntry): Promise<void> {
   const slider = $('time-slider') as HTMLInputElement
   slider.value = '0'
 
-  if (map.getLayer(LAYER_DOT)) map.removeLayer(LAYER_DOT)
-  if (map.getLayer(LAYER_GLOW)) map.removeLayer(LAYER_GLOW)
-  if (map.getSource(SOURCE_ID)) map.removeSource(SOURCE_ID)
+  removeLidenLayers(map)
   addLidenLayers(map, tileUrl(day), state.index.layer)
 
   buildDaySeg()
   buildTypeToggles()
   updateDayNote()
+  refreshFilter()
   refreshLayers()
   if (day.bbox) {
     map.fitBounds(day.bbox, { padding: 48, duration: 0, maxZoom: 8 })
@@ -223,6 +262,7 @@ function applyTheme(theme: Theme): void {
   map.setStyle(getBasemapStyle(theme), { diff: false })
   map.once('styledata', () => {
     addLidenLayers(map, tileUrl(state.day), state.index.layer)
+    refreshFilter()
     refreshLayers()
   })
 }
@@ -315,7 +355,7 @@ async function boot(): Promise<void> {
 
   // クリックで1件の内容を見る
   const tooltip = $('tooltip')
-  map.on('click', LAYER_DOT, (e) => {
+  map.on('click', PICK_LAYER, (e) => {
     const f = e.features?.[0]
     if (!f) return
     const p = f.properties ?? {}
@@ -327,11 +367,11 @@ async function boot(): Promise<void> {
       'type ' + p.type + ' / 配信スライス ' + p.slice
   })
   map.on('click', (e) => {
-    const hits = map.queryRenderedFeatures(e.point, { layers: [LAYER_DOT] })
+    const hits = map.queryRenderedFeatures(e.point, { layers: [PICK_LAYER] })
     if (hits.length === 0) tooltip.hidden = true
   })
-  map.on('mouseenter', LAYER_DOT, () => { map.getCanvas().style.cursor = 'pointer' })
-  map.on('mouseleave', LAYER_DOT, () => { map.getCanvas().style.cursor = '' })
+  map.on('mouseenter', PICK_LAYER, () => { map.getCanvas().style.cursor = 'pointer' })
+  map.on('mouseleave', PICK_LAYER, () => { map.getCanvas().style.cursor = '' })
   map.on('moveend', updateVisibleCount)
   // タイルの読み込みが終わるまで queryRenderedFeatures は空を返す。
   // refreshLayers の直後に数えるだけでは 0 のままになるので idle で数え直す。
@@ -343,6 +383,7 @@ async function boot(): Promise<void> {
   buildTypeToggles()
   updateDayNote()
   updateLegend()
+  refreshFilter()
   refreshLayers()
   if (latest.bbox) map.fitBounds(latest.bbox, { padding: 48, duration: 0, maxZoom: 8 })
 }
