@@ -43,6 +43,42 @@ const AGE_RAMP: Array<[number, string]> = [
 export const TILE_MAXZOOM = 7
 
 /**
+ * 放電種別（配信値 `type`）のグループ分け。
+ *
+ * 出典は気象庁「配信資料に関する仕様 No.13201 雷観測データ」の
+ * > 放電種別（TT）：0-1 雲放電、4 対地放電
+ * https://www.data.jma.go.jp/suishin/shiyou/pdf/no13201
+ *
+ * **アーカイブ側は `type` を変換していない。** ラベル付けはここだけでやる。
+ * 仕様が改訂されてもアーカイブを作り直さずに済むようにするため。
+ */
+export const DISCHARGE_GROUPS: Array<{ key: string; label: string; note: string; codes: number[] }> = [
+  { key: 'ground', label: '対地放電（落雷）', note: 'type 4', codes: [4] },
+  { key: 'cloud', label: '雲放電', note: 'type 0・1', codes: [0, 1] },
+]
+
+/**
+ * 仕様に無いコードは「その他」に集める。**黙って隠さない**のが要点。
+ * 配信側が新しい種別を出し始めたときに気づけなくなる。
+ */
+export function groupTypes(present: number[]): Array<{ key: string; label: string; note: string; codes: number[] }> {
+  const known = new Set(DISCHARGE_GROUPS.flatMap((g) => g.codes))
+  const groups = DISCHARGE_GROUPS
+    .map((g) => ({ ...g, codes: g.codes.filter((c) => present.includes(c)) }))
+    .filter((g) => g.codes.length > 0)
+  const unknown = present.filter((c) => !known.has(c)).sort((a, b) => a - b)
+  if (unknown.length > 0) {
+    groups.push({
+      key: 'other',
+      label: 'その他（仕様に無いコード）',
+      note: unknown.map((c) => `type ${c}`).join('・'),
+      codes: unknown,
+    })
+  }
+  return groups
+}
+
+/**
  * 経過時間（0=最新, 1=窓の端）から色を作る式。
  *
  * `cursor` は再生ごとに変わるので、この式もフレームごとに作り直して

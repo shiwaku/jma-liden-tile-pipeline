@@ -596,3 +596,12 @@ body {
 :root[data-theme='dark'] #map {
   background: #0b0d12;
 }
+
+/* 放電種別トグルの補助表記（type コード） */
+.toggle .t-label small {
+  display: block;
+  margin-top: 1px;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}

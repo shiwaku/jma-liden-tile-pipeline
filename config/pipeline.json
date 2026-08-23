@@ -1,9 +1,10 @@
 {
   "source": {
     "url_template": "https://www.jma.go.jp/bosai/jmatile/data/nowc/{basetime}/none/{basetime}/surf/liden/data.geojson?id=liden",
-    "target_times_url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json",
+    "target_times_url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json",
     "interval_minutes": 5,
-    "comment": "basetime は UTC の5分境界。スライスは (basetime-5分, basetime] の観測を含む"
+    "comment": "basetime は UTC の5分境界。スライスは (basetime-5分, basetime] の観測を含む",
+    "target_times_comment": "liden を列挙するのは N3。N1/N2 は高解像度降水ナウキャスト(hrpns)だけで liden を含まない。N3 の elements は amds_rain10m / liden / slmcs / thns / trns など。なお N3 が列挙するのも直近3.5時間ほどで、URL を直接叩けば約5日前まで取れる（列挙範囲＝取得可能範囲ではない）。"
   },
   "collect": {
     "window_days": 4,
@@ -23,5 +24,16 @@
       "--extend-zooms-if-still-dropping"
     ],
     "comment": "-z7: 元データの座標精度は 0.001 度なので、タイル解像度が精度に達する ZL は 360/(4096*2^z) <= 0.001 → z>=6.5 で z7。z7 と z12 で最大ZLの一意 src_id が 20,271 件で完全一致し、容量は 6.68MB -> 2.71MB(-59%) になった（実測）。z7 超は情報を増やさず重複だけ増える。高ズームはビューア側のオーバーズームで描く。 / -r1: 点の間引きを止める（落雷は1点1事象なので落とさない）。低ZLの過密だけ --drop-densest-as-needed で処理する。"
+  },
+  "discharge_types": {
+    "source": "気象庁 配信資料に関する仕様 No.13201「雷観測データ」",
+    "url": "https://www.data.jma.go.jp/suishin/shiyou/pdf/no13201",
+    "quote": "放電種別（TT）：0-1 雲放電、4 対地放電",
+    "map": {
+      "0": "雲放電",
+      "1": "雲放電",
+      "4": "対地放電"
+    },
+    "comment": "アーカイブには type を変換せず素の値で入れる（一次資料が改訂されてもアーカイブを作り直さなくていいように）。ラベル付けはビューア側だけで行う。"
   }
 }

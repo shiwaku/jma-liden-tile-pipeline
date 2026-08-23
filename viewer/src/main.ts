@@ -10,6 +10,7 @@ import {
   ageColor,
   ageOpacity,
   buildFilter,
+  groupTypes,
   legendHtml,
   LAYER_DOT,
   LAYER_GLOW,
@@ -150,23 +151,31 @@ function buildDaySeg(): void {
 function buildTypeToggles(): void {
   const box = $('types')
   box.innerHTML = ''
-  const types = Object.keys(state.day.types ?? {}).map(Number).sort((a, b) => a - b)
-  for (const t of types) {
+  const present = Object.keys(state.day.types ?? {}).map(Number).sort((a, b) => a - b)
+  for (const g of groupTypes(present)) {
+    const n = g.codes.reduce((sum, c) => sum + (state.day.types?.[String(c)] ?? 0), 0)
     const label = document.createElement('label')
     label.className = 'toggle'
     const input = document.createElement('input')
     input.type = 'checkbox'
-    input.id = 'type-' + t
-    input.checked = state.activeTypes.has(t)
+    input.id = 'group-' + g.key
+    input.checked = g.codes.every((c) => state.activeTypes.has(c))
     input.addEventListener('change', () => {
-      if (input.checked) state.activeTypes.add(t)
-      else state.activeTypes.delete(t)
+      for (const c of g.codes) {
+        if (input.checked) state.activeTypes.add(c)
+        else state.activeTypes.delete(c)
+      }
       refreshLayers()
     })
+    // 流用した CSS は input を隠して .switch を見せる構造。
+    // .switch を出さないとチェックボックスが一切見えなくなる（実際に踏んだ）。
+    const knob = document.createElement('span')
+    knob.className = 'switch'
     const span = document.createElement('span')
-    const n = state.day.types?.[String(t)] ?? 0
-    span.innerHTML = 'type ' + t + ' <em>' + n.toLocaleString('ja-JP') + '</em>'
-    label.append(input, span)
+    span.className = 't-label'
+    span.innerHTML = g.label + ' <em>' + n.toLocaleString('ja-JP') + '</em>' +
+      '<small>' + g.note + '</small>'
+    label.append(input, knob, span)
     box.appendChild(label)
   }
 }

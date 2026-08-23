@@ -64,12 +64,13 @@
       </div>
 
       <div class="field">
-        <span class="field-label">放電種別（配信値）</span>
+        <span class="field-label">放電種別</span>
         <div id="types" class="toggles"></div>
         <p class="note">
-          気象庁は表示上「対地放電 / 雲放電」を区別するが、
-          <strong>type の数値との対応は一次資料で確認できていない</strong>ため、
-          配信値のまま並べている。
+          出典: 気象庁「配信資料に関する仕様 No.13201 雷観測データ」
+          <em>放電種別（TT）：0-1 雲放電、4 対地放電</em>。
+          アーカイブには配信値 <code>type</code> をそのまま保存し、
+          ラベル付けはここだけで行っている。
         </p>
       </div>
 

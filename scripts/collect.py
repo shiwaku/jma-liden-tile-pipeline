@@ -65,6 +65,12 @@ def fetch_slice(url: str, timeout: int, retries: int) -> tuple[int, dict | None]
     raise RuntimeError(f"取得失敗: {url}: {last_exc!r}")
 
 
+#: 放電種別の既知コード。気象庁「配信資料に関する仕様 No.13201 雷観測データ」の
+#: 「放電種別（TT）：0-1 雲放電、4 対地放電」より。
+#: https://www.data.jma.go.jp/suishin/shiyou/pdf/no13201
+KNOWN_DISCHARGE_TYPES = frozenset({0, 1, 4})
+
+
 def validate_slice(basetime: str, geojson: dict) -> list[str]:
     """スライスの前提が崩れていないか検査し、警告文のリストを返す。
 
@@ -72,9 +78,17 @@ def validate_slice(basetime: str, geojson: dict) -> list[str]:
       - geometry は Point のみ
       - properties は id / obstimeJST / type
       - obstimeJST は (basetime-5分, basetime] に入る
+      - type は 0 / 1 / 4 のいずれか
     崩れたら黙って通さない。データ側の仕様変更に気づけなくなる。
     """
     warns: list[str] = []
+    unknown = {f.get("properties", {}).get("type") for f in geojson.get("features", [])}
+    unknown -= KNOWN_DISCHARGE_TYPES
+    if unknown:
+        warns.append(
+            f"仕様(No.13201)に無い放電種別: {sorted(unknown, key=str)} "
+            f"— ビューアは「その他」に集めるが、意味を確認すること"
+        )
     end_jst = basetime_dt(basetime).astimezone(JST)
     for f in geojson.get("features", []):
         geom = f.get("geometry") or {}
