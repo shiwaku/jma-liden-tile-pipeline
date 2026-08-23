@@ -286,6 +286,11 @@ async function boot(): Promise<void> {
   index.days = days
   const latest = days[days.length - 1]
 
+  // `hash: true` の Map は初期化直後に自分でハッシュを書くので、
+  // **Map を作る前に**「URL で位置指定があったか」を控える。
+  // これを見ずに常に fitBounds すると、URL で位置を指定しても無視される。
+  const hadHash = window.location.hash.length > 1
+
   const theme = initialTheme()
   state = {
     index,
@@ -388,7 +393,11 @@ async function boot(): Promise<void> {
   updateLegend()
   refreshFilter()
   refreshLayers()
-  if (latest.bbox) map.fitBounds(latest.bbox, { padding: 48, duration: 0, maxZoom: 8 })
+  // URL で位置が指定されていない初回だけデータ範囲に合わせる。
+  // fitBounds は duration:0（アニメーション中に hashchange が割り込むと戻される）。
+  if (!hadHash && latest.bbox) {
+    map.fitBounds(latest.bbox, { padding: 48, duration: 0, maxZoom: 8 })
+  }
 }
 
 void boot()
