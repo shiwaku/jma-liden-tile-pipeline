@@ -1,0 +1,21 @@
+# 配信のキャッシュ。5日で消える配信を取り直さないためだけの置き場で、
+# アーカイブ(archive/)に入った後はいつ消してもよい。
+data/raw/
+data/work/
+
+# 生成物。archive/ から再生成できる
+dist/
+
+# ビューアのビルド成果物
+viewer/dist/
+viewer/node_modules/
+viewer/.env
+
+# Python
+__pycache__/
+*.pyc
+
+# 一時ファイル
+*.part
+*.tmp
+*.mbtiles

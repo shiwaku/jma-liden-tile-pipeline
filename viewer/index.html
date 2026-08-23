@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>落雷の位置 タイムラプス</title>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="tooltip" class="map-tooltip" hidden></div>
+
+  <section id="panel" class="panel" aria-label="コントロールパネル">
+    <header class="panel-head">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">⚡</span>
+        <h1>落雷の位置</h1>
+      </div>
+      <div class="head-actions">
+        <button id="theme-btn" class="icon-btn" type="button" title="テーマ切替" aria-label="テーマ切替"></button>
+        <button id="collapse-btn" class="icon-btn" type="button" title="パネル開閉" aria-label="パネル開閉"></button>
+      </div>
+    </header>
+
+    <div id="panel-body" class="panel-body">
+      <div class="field">
+        <label class="field-label" for="day-seg">日付 (JST)</label>
+        <div class="seg" id="day-seg" role="tablist" aria-label="日付選択"></div>
+        <p id="day-note" class="note"></p>
+      </div>
+
+      <div class="field">
+        <span class="field-label">時刻</span>
+        <div class="clock-row">
+          <button id="play-btn" class="play-btn" type="button" aria-label="再生／停止">▶</button>
+          <output id="clock" class="clock">--:--</output>
+          <span id="visible-count" class="count">0 件</span>
+        </div>
+        <input id="time-slider" class="slider" type="range" min="0" max="287" step="1" value="0"
+               aria-label="時刻スライダー" />
+        <div class="slider-scale" aria-hidden="true">
+          <span>0時</span><span>6時</span><span>12時</span><span>18時</span><span>24時</span>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="field-label" for="window-select">残光（表示する直前の時間）</label>
+        <select id="window-select" class="select">
+          <option value="5">5分</option>
+          <option value="15">15分</option>
+          <option value="30" selected>30分</option>
+          <option value="60">60分</option>
+          <option value="180">3時間</option>
+          <option value="0">1日ぶんすべて</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label class="field-label" for="speed-select">再生速度</label>
+        <select id="speed-select" class="select">
+          <option value="2">遅い（2分/コマ）</option>
+          <option value="5" selected>標準（5分/コマ）</option>
+          <option value="15">速い（15分/コマ）</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <span class="field-label">放電種別（配信値）</span>
+        <div id="types" class="toggles"></div>
+        <p class="note">
+          気象庁は表示上「対地放電 / 雲放電」を区別するが、
+          <strong>type の数値との対応は一次資料で確認できていない</strong>ため、
+          配信値のまま並べている。
+        </p>
+      </div>
+
+      <div class="field">
+        <span class="field-label">凡例</span>
+        <div id="legend" class="legend"></div>
+      </div>
+
+      <footer class="panel-foot">
+        データ: 気象庁 高解像度降水ナウキャスト「落雷の位置」<br />
+        背景: 国土地理院 最適化ベクトルタイル
+      </footer>
+    </div>
+  </section>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

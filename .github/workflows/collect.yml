@@ -1,0 +1,117 @@
+name: collect liden
+
+# **手動実行のみ。** このリポジトリは「普段は溜めない。雷雨のときに最新を見る」
+# 運用を選んでいるため、定期実行は入れていない。
+#
+# 定期収集に切り替えたくなったら下の schedule のコメントを外す。配信は約5日の
+# ローリングウィンドウなので、6時間ごとで取りこぼさない（5分ごとに回す必要はない）。
+# ただし有効にすると archive/ が毎日 1〜3 MB ずつ増え、コミットが積まれる。
+#
+# on:
+#   schedule:
+#     - cron: '17 */6 * * *'
+
+on:
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: '遡る時間（既定 3。配信保持は約120時間まで）'
+        required: false
+        default: '3'
+      commit_archive:
+        description: 'アーカイブをコミットする'
+        type: boolean
+        required: false
+        default: true
+
+concurrency:
+  group: collect-liden
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 収集（未取得スライスのみ）
+        run: python scripts/collect.py --window-days "$(python -c "print(${{ inputs.hours }}/24)")"
+
+      - name: アーカイブへ投入
+        run: python scripts/normalize.py
+
+      - name: カバレッジ点検
+        run: python scripts/status.py
+
+      - name: アーカイブをコミット
+        if: ${{ inputs.commit_archive }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add archive/
+          if git diff --cached --quiet; then
+            echo "アーカイブに変化なし"
+          else
+            git commit -m "archive: liden $(date -u +%Y-%m-%dT%H:%MZ)"
+            for i in 1 2 3; do
+              git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && git push && break
+              echo "push 再試行 $i"; sleep 5
+            done
+          fi
+
+  # タイル生成は tippecanoe が要るので収集とは別ジョブにする
+  tiles:
+    needs: collect
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # tippecanoe は apt に無いのでソースからビルドしてキャッシュする
+      - name: tippecanoe をキャッシュ
+        id: cache-tippecanoe
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/tippecanoe
+          key: tippecanoe-2.80.0
+
+      - name: tippecanoe をビルド
+        if: steps.cache-tippecanoe.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential libsqlite3-dev zlib1g-dev
+          git clone --depth 1 -b 2.80.0 https://github.com/felt/tippecanoe.git /tmp/tippecanoe
+          make -C /tmp/tippecanoe -j"$(nproc)"
+          mkdir -p ~/.local/bin
+          cp /tmp/tippecanoe/tippecanoe ~/.local/bin/
+
+      - name: pmtiles CLI を入れる
+        run: |
+          mkdir -p ~/.local/bin
+          curl -fsSL https://github.com/protomaps/go-pmtiles/releases/download/v1.30.3/go-pmtiles_1.30.3_Linux_x86_64.tar.gz \
+            | tar -xz -C ~/.local/bin pmtiles
+
+      - name: タイル生成
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          python scripts/build.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: liden-pmtiles
+          path: |
+            dist/*.pmtiles
+            dist/index.json
+          retention-days: 14

@@ -1,0 +1,27 @@
+{
+  "source": {
+    "url_template": "https://www.jma.go.jp/bosai/jmatile/data/nowc/{basetime}/none/{basetime}/surf/liden/data.geojson?id=liden",
+    "target_times_url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json",
+    "interval_minutes": 5,
+    "comment": "basetime は UTC の5分境界。スライスは (basetime-5分, basetime] の観測を含む"
+  },
+  "collect": {
+    "window_days": 4,
+    "request_interval_sec": 0.4,
+    "timeout_sec": 30,
+    "retries": 3,
+    "max_slices_per_run": 2000,
+    "comment": "window_days は配信保持期間(実測約5日)より短くとる。ギャップはこの窓の中なら後追いで埋まる"
+  },
+  "tiles": {
+    "layer": "liden",
+    "tippecanoe": [
+      "-Z3",
+      "-z7",
+      "-r1",
+      "--drop-densest-as-needed",
+      "--extend-zooms-if-still-dropping"
+    ],
+    "comment": "-z7: 元データの座標精度は 0.001 度なので、タイル解像度が精度に達する ZL は 360/(4096*2^z) <= 0.001 → z>=6.5 で z7。z7 と z12 で最大ZLの一意 src_id が 20,271 件で完全一致し、容量は 6.68MB -> 2.71MB(-59%) になった（実測）。z7 超は情報を増やさず重複だけ増える。高ズームはビューア側のオーバーズームで描く。 / -r1: 点の間引きを止める（落雷は1点1事象なので落とさない）。低ZLの過密だけ --drop-densest-as-needed で処理する。"
+  }
+}

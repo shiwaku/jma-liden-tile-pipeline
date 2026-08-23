@@ -1,0 +1,13 @@
+# 既定は LF に正規化する。deploy-pages.sh は CRLF だと bash が動かないし、
+# CI(ubuntu) と Windows で行末が揺れると差分が無意味に出る。
+* text=auto eol=lf
+
+# アーカイブは gzip。**テキスト扱いされると壊れる**ので明示的にバイナリにする。
+# ここが一次資産なので、行末変換の事故は絶対に避ける。
+*.gz     binary
+*.pmtiles binary
+*.mbtiles binary
+*.png    binary
+
+# PowerShell は CRLF のままにしておく
+*.ps1 text eol=crlf
