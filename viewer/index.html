@@ -40,9 +40,9 @@
         </div>
         <input id="time-slider" class="slider" type="range" min="0" max="1440" step="1" value="0"
                aria-label="時刻スライダー" />
-        <div class="slider-scale" aria-hidden="true">
-          <span>0時</span><span>6時</span><span>12時</span><span>18時</span><span>24時</span>
-        </div>
+        <!-- 目盛りは表示している日付を JS が入れる（buildSliderScale）。
+             タイムラインは全日通しなので「0時/6時/…」では位置が分からない。 -->
+        <div class="slider-scale" id="slider-scale" aria-hidden="true"></div>
       </div>
 
       <div class="field">

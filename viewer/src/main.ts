@@ -73,8 +73,15 @@ const $ = <T extends HTMLElement>(id: string): T => {
 
 interface State {
   index: Index
+  /** カーソルがいま乗っている日。`minute` から導くので直接書き換えない */
   day: DayEntry
-  /** JST 00:00 からの経過分（0..1440）。時刻カーソルの位置 */
+  /**
+   * **タイムライン先頭からの経過分**（0..表示日数×1440）。
+   *
+   * 1日ぶんではなく**表示している全日を通した**位置を持つ。日をまたいで
+   * 再生するために、カーソルを日に属さない値にしてある。日への対応づけは
+   * `dayAt()` / `cursorMs()` が持つ。
+   */
   minute: number
   windowMinutes: number
   stepMinutes: number
@@ -96,12 +103,40 @@ function dayStartMs(date: string): number {
   return Date.UTC(y, m - 1, d, 0, 0, 0) - 9 * 3600 * 1000
 }
 
-function cursorMs(): number {
-  return dayStartMs(state.day.date) + state.minute * 60 * 1000
+/**
+ * タイムライン全体の長さ（分）。**表示している日数 × 1440。**
+ *
+ * 実時間の差ではなく**日の枚数**で数える。収集していない日はそもそも
+ * index.json に載らないのでアーカイブには穴が空きうる。実時間で測ると
+ * 誰もいない何日ぶんもスクラブする羽目になるので、1日を1レーンとして詰める。
+ * 日付は時計にも目盛りにも必ず出しているので、詰めても読み違えない。
+ */
+function timelineMinutes(): number {
+  return state.index.days.length * MINUTES_PER_DAY
 }
 
+/** その分位置が何日目のレーンか。末尾（＝全長ちょうど）は最終日に寄せる。 */
+function dayIndexAt(minute: number): number {
+  const i = Math.floor(minute / MINUTES_PER_DAY)
+  return Math.min(Math.max(i, 0), state.index.days.length - 1)
+}
+
+function dayAt(minute: number): DayEntry {
+  return state.index.days[dayIndexAt(minute)]
+}
+
+/** その日の中での分（0..1440）。 */
+function minuteOfDay(minute: number): number {
+  return minute - dayIndexAt(minute) * MINUTES_PER_DAY
+}
+
+function cursorMs(): number {
+  return dayStartMs(dayAt(state.minute).date) + minuteOfDay(state.minute) * 60 * 1000
+}
+
+/** カーソルが乗っている日の JST 00:00〜24:00。「1日ぶんすべて」表示で使う。 */
 function dayRange(): [number, number] {
-  const start = dayStartMs(state.day.date)
+  const start = dayStartMs(dayAt(state.minute).date)
   return [start, start + MINUTES_PER_DAY * 60 * 1000]
 }
 
@@ -154,6 +189,38 @@ function refreshLayers(): void {
   updateVisibleCount()
 }
 
+/**
+ * カーソルが別の日のレーンに入ったらタイルを差し替える。
+ *
+ * タイルは日ごとに分かれているので、通しで再生すると真夜中でソースを
+ * 貼り替える必要がある。**毎コマ呼ばれるので、日が変わっていなければ即戻る**こと
+ * （`addLidenLayers` はソースの作り直しで重い）。
+ *
+ * ここでは `fitBounds` しない。再生中に真夜中を越えるたび地図が飛ぶのは邪魔なので、
+ * 画面を合わせるのは日付タブを押したとき（`jumpToDay`）だけにする。
+ *
+ * **`activeTypes` にも触らない。** 日によって出る type は違うが、真夜中ごとに
+ * 絞り込みが戻ると、消したはずの雲放電が勝手に復活する。
+ */
+function syncDay(): void {
+  const day = dayAt(state.minute)
+  if (day.date === state.day.date) return
+  state.day = day
+  removeLidenLayers(map)
+  addLidenLayers(map, tileUrl(day), state.index.layer)
+  refreshFilter()
+  markSelectedDay()
+  updateDayNote()
+}
+
+/** カーソルを動かし、スライダー・タイル・描画をまとめて追従させる。 */
+function setMinute(minute: number): void {
+  state.minute = Math.min(Math.max(minute, 0), timelineMinutes())
+  ;($('time-slider') as HTMLInputElement).value = String(state.minute)
+  syncDay()
+  refreshLayers()
+}
+
 /** 種別の絞り込み。トグル操作のときだけ呼ぶ。 */
 function refreshFilter(): void {
   if (!map.getLayer(COUNT_LAYER)) return
@@ -161,11 +228,18 @@ function refreshFilter(): void {
   for (const s of GLOW_LAYERS) map.setFilter(s.id, filter)
 }
 
+/** 通しのタイムラインなので、時刻だけでは何日目か分からない。**必ず日付も出す。** */
 function updateClock(): void {
-  const m = state.minute
+  const m = minuteOfDay(state.minute)
   const hh = String(Math.floor(m / 60) % 24).padStart(2, '0')
   const mm = String(m % 60).padStart(2, '0')
-  $('clock').textContent = m === MINUTES_PER_DAY ? '24:00' : hh + ':' + mm
+  const time = m === MINUTES_PER_DAY ? '24:00' : hh + ':' + mm
+  $('clock').textContent = mmdd(dayAt(state.minute)) + ' ' + time
+}
+
+/** 日付の短い表記（`8/26`）。タブ・目盛り・時計で同じものを使う。 */
+function mmdd(day: DayEntry): string {
+  return +day.date.slice(4, 6) + '/' + +day.date.slice(6, 8)
 }
 
 /**
@@ -192,11 +266,10 @@ function updateVisibleCount(): void {
 // ---- 再生 ----
 
 function tick(): void {
-  state.minute += state.stepMinutes
-  if (state.minute > MINUTES_PER_DAY) state.minute = 0
-  const slider = $('time-slider') as HTMLInputElement
-  slider.value = String(state.minute)
-  refreshLayers()
+  let next = state.minute + state.stepMinutes
+  // 末尾まで行ったら先頭の日へ戻る（1日ぶんではなく**全日**を1周する）
+  if (next > timelineMinutes()) next = 0
+  setMinute(next)
 }
 
 function setPlaying(on: boolean): void {
@@ -211,29 +284,61 @@ function setPlaying(on: boolean): void {
 
 // ---- パネルの組み立て ----
 
+/**
+ * 日付タブ。**タイムラインは通しなので、これは「その日の 00:00 へ飛ぶ」ボタン。**
+ * 押してもタイルの読み込み直しはしない（カーソルを動かせば `syncDay` が追う）。
+ */
 function buildDaySeg(): void {
   const seg = $('day-seg')
   seg.innerHTML = ''
-  for (const day of state.index.days) {
+  state.index.days.forEach((day, i) => {
     const btn = document.createElement('button')
     btn.type = 'button'
     btn.role = 'tab'
+    btn.dataset.date = day.date
     // 選択状態は既存 CSS の .seg button[aria-selected='true'] に合わせる
     btn.setAttribute('aria-selected', String(day.date === state.day.date))
-    btn.textContent = +day.date.slice(4, 6) + '/' + +day.date.slice(6, 8)
+    btn.textContent = mmdd(day)
     btn.title = day.count.toLocaleString('ja-JP') + ' 件 / ' + day.slices + '/288 枠'
     if (!day.complete) btn.classList.add('is-partial')
-    btn.addEventListener('click', () => void selectDay(day))
+    btn.addEventListener('click', () => jumpToDay(i))
     seg.appendChild(btn)
+  })
+}
+
+/**
+ * 選択表示だけを塗り替える。**再生中は真夜中ごとに呼ばれる**ので、
+ * タブを作り直す `buildDaySeg` とは分けてある（作り直すとクリックの取りこぼしが出る）。
+ */
+function markSelectedDay(): void {
+  for (const btn of $('day-seg').querySelectorAll<HTMLButtonElement>('button')) {
+    btn.setAttribute('aria-selected', String(btn.dataset.date === state.day.date))
+  }
+}
+
+/**
+ * スライダーの目盛り。通しなので「0時/6時/…」では今どのへんか分からない。
+ * 日付を**レーンの左端に**並べる。
+ */
+function buildSliderScale(): void {
+  const box = $('slider-scale')
+  box.innerHTML = ''
+  for (const day of state.index.days) {
+    const span = document.createElement('span')
+    span.textContent = mmdd(day)
+    box.appendChild(span)
   }
 }
 
 function buildTypeToggles(): void {
   const box = $('types')
   box.innerHTML = ''
-  const present = Object.keys(state.day.types ?? {}).map(Number).sort((a, b) => a - b)
+  // **表示している全日の合計**で出す。日ごとの件数にすると、通し再生で真夜中を
+  // 越えるたび数字が飛んで、絞り込みを操作したのかデータが変わったのか分からない。
+  const totals = totalTypes()
+  const present = Object.keys(totals).map(Number).sort((a, b) => a - b)
   for (const g of groupTypes(present)) {
-    const n = g.codes.reduce((sum, c) => sum + (state.day.types?.[String(c)] ?? 0), 0)
+    const n = g.codes.reduce((sum, c) => sum + (totals[String(c)] ?? 0), 0)
     const label = document.createElement('label')
     label.className = 'toggle'
     const input = document.createElement('input')
@@ -274,24 +379,27 @@ function updateLegend(): void {
   $('legend').innerHTML = legendHtml(state.windowMinutes)
 }
 
-async function selectDay(day: DayEntry): Promise<void> {
-  state.day = day
-  state.activeTypes = new Set(Object.keys(day.types ?? {}).map(Number))
-  state.minute = 0
-  const slider = $('time-slider') as HTMLInputElement
-  slider.value = '0'
-
-  removeLidenLayers(map)
-  addLidenLayers(map, tileUrl(day), state.index.layer)
-
-  buildDaySeg()
-  buildTypeToggles()
-  updateDayNote()
-  refreshFilter()
-  refreshLayers()
+/**
+ * その日の 00:00 へ飛ぶ。**再生は止めない**（飛んだ先からそのまま流れる）。
+ *
+ * 画面を合わせるのはここだけ。`syncDay` 側でも `fitBounds` すると、
+ * 通し再生で真夜中を越えるたびに地図が飛んでしまう。
+ */
+function jumpToDay(i: number): void {
+  setMinute(i * MINUTES_PER_DAY)
+  const day = state.index.days[i]
   if (day.bbox) {
     map.fitBounds(day.bbox, { padding: 48, duration: 0, maxZoom: 8 })
   }
+}
+
+/** 表示している全日を合計した type 別件数。 */
+function totalTypes(): Record<string, number> {
+  const total: Record<string, number> = {}
+  for (const d of state.index.days) {
+    for (const [k, v] of Object.entries(d.types ?? {})) total[k] = (total[k] ?? 0) + v
+  }
+  return total
 }
 
 // ---- テーマ ----
@@ -335,6 +443,9 @@ async function boot(): Promise<void> {
   }
   index.days = days
   const latest = days[days.length - 1]
+  // 起動位置は**最新日の 00:00**。通しになっても、開いた直後に見えるものは
+  // これまでと同じにしておく。過去へはスライダーを左へ引けば繋がっている。
+  const startMinute = (days.length - 1) * MINUTES_PER_DAY
 
   // `hash: true` の Map は初期化直後に自分でハッシュを書くので、
   // **Map を作る前に**「URL で位置指定があったか」を控える。
@@ -345,10 +456,14 @@ async function boot(): Promise<void> {
   state = {
     index,
     day: latest,
-    minute: 0,
+    minute: startMinute,
     windowMinutes: 30,
     stepMinutes: 5,
-    activeTypes: new Set(Object.keys(latest.types ?? {}).map(Number)),
+    // **全日に出てくる type をまとめて有効にする。** 最新日にしか無い type で
+    // 初期化すると、過去の日へスクラブしたときに一部が黙って消える。
+    activeTypes: new Set(
+      days.flatMap((d) => Object.keys(d.types ?? {})).map(Number),
+    ),
     playing: false,
     theme,
   }
@@ -397,9 +512,9 @@ async function boot(): Promise<void> {
 
   $('play-btn').addEventListener('click', () => setPlaying(!state.playing))
   $('time-slider').addEventListener('input', (e) => {
-    state.minute = +(e.target as HTMLInputElement).value
     setPlaying(false)
-    refreshLayers()
+    // ドラッグで日をまたぐので、タイルの差し替えも要る（setMinute が面倒を見る）
+    setMinute(+(e.target as HTMLInputElement).value)
   })
   $('window-select').addEventListener('change', (e) => {
     state.windowMinutes = +(e.target as HTMLSelectElement).value
@@ -435,8 +550,14 @@ async function boot(): Promise<void> {
   // refreshLayers の直後に数えるだけでは 0 のままになるので idle で数え直す。
   map.on('idle', updateVisibleCount)
 
+  // スライダーは**全日通し**。max は日数×1440（HTML の 1440 固定を上書きする）。
+  const slider = $('time-slider') as HTMLInputElement
+  slider.max = String(timelineMinutes())
+  slider.value = String(startMinute)
+
   await new Promise<void>((resolve) => map.once('load', () => resolve()))
   addLidenLayers(map, tileUrl(latest), index.layer)
+  buildSliderScale()
   buildDaySeg()
   buildTypeToggles()
   updateDayNote()

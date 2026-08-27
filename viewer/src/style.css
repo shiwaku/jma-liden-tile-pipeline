@@ -501,6 +501,19 @@ body {
   grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
 }
 
+/* スライダーの目盛りは**レーンの左端**に置く。
+
+   流用元は `justify-content: space-between` で、5個並べると最初が左端・最後が
+   右端に貼り付く（i/4 の位置）。ところが日付は1日＝1レーンなので、ラベルの
+   あるべき位置は i/5。space-between のままだと**目盛りと中身が最大1日ぶんずれる**。
+   等幅の列に切って左寄せにすれば、ラベルがそのレーンの先頭を指す。 */
+#slider-scale {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  justify-items: start;
+}
+
 /* 未取得の時間帯がある日は下線で示す */
 .seg button.is-partial::after {
   content: '';
