@@ -644,9 +644,23 @@ async function boot(): Promise<void> {
     zoom: 4.4,
     maxZoom: 14,
     hash: true,
+    // 既定の出典表示を切って、下で compact のものを自前で足す。
+    // 切らずに足すと**出典が2つ並ぶ**。
+    attributionControl: false,
   })
-  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right')
+  // 標準コントロールの配置は参考実装（japan-gtfs-frequency-converter の
+  // `viewer/src/main.ts`）に合わせる。ズームは右上、縮尺は左下、
+  // 出典は compact で右下。
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
+  map.addControl(
+    new maplibregl.GeolocateControl({
+      positionOptions: { enableHighAccuracy: true },
+      trackUserLocation: true,
+    }),
+    'top-right',
+  )
   map.addControl(new maplibregl.ScaleControl({ maxWidth: 120 }), 'bottom-left')
+  map.addControl(new maplibregl.AttributionControl({ compact: true }))
 
   // スタイル・タイルのエラーは黙って落ちる（「地図は出るがオーバーレイだけ出ない」
   // 形で壊れる）。開発時は必ず表に出す。
