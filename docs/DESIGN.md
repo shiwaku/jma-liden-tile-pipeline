@@ -319,6 +319,36 @@ CI は `2.79.0` を固定でビルドする。**バージョン差は問題に�
 - 枠番が 0..287 に収まり、窓内で衝突しない
 - JST 00:00 終端が前日の枠287 に入る（`slice_day_index` の定義どおり）
 
+## 標準コントロールは参考実装に合わせる
+
+配置は `japan-gtfs-frequency-converter`（`viewer/src/main.ts`）に揃える。
+ズームと現在地は**右上**、縮尺は左下、出典は `compact` で右下。
+当初ズームだけ右下に置いていたが、参考実装と食い違っていた。
+
+- **`attributionControl: false` を Map のオプションに入れてから**
+  `AttributionControl({ compact: true })` を足す。切らずに足すと出典が2つ並ぶ。
+- 出典は compact にしても消えない（ⓘ で開く）。気象庁の出典はパネル脚注にも
+  別途出しているので、どちらか一方が隠れても要件は満たす。
+
+### ダークテーマでアイコンが埋もれる
+
+**MapLibre 標準アイコンは `fill='#333'` 固定。** `.maplibregl-ctrl-group` の
+背景だけ `--surface-solid` でダークにすると、＋と−が暗い面に埋もれて
+「かすれて見えない」になる（実際にそう見えていた）。背景を差し替えたら
+アイコン側も必ず面倒を見ること。
+
+```css
+:root[data-theme='dark'] .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+  filter: invert(1) hue-rotate(180deg);
+}
+```
+
+**`invert(1)` だけにしない。** 現在地アイコンは追従状態で色が付く（青など）ので、
+反転しただけだと色相が反転して別の色になる。`hue-rotate(180deg)` で戻す。
+
+区切り線（既定 `#ddd`）も忘れない。暗い面に白線が走って浮く。ホバーの
+`rgb(0 0 0/5%)` も暗い面では見えないので `--hover` に寄せる。
+
 ## 公開サイトが更新されないときはブラウザのキャッシュを疑う
 
 Actions を回して収集もタイル生成も gh-pages デプロイも成功しているのに、
