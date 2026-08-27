@@ -482,6 +482,25 @@ body {
 
 /* ==== 落雷ビューア固有 ==== */
 
+/* 日付タブは**折り返す**。
+
+   流用元の `.seg` は「年次」（数個しか無い）用の
+   `grid-auto-flow: column` で、1行に詰め込む前提になっている。
+   ところが liden の日付は配信保持の5日ぶんを取ると10日近くになり、
+   `grid-auto-columns: 1fr` の最小サイズは auto（＝min-content）なので
+   トラックが縮みきらず、**パネル(300px, overflow:hidden)からはみ出して
+   右端の日が切れる**。選択中＝最新の日が切れるので一番困る。
+
+   `auto-fill` + `minmax()` にすると、入るだけ列を作って残りは次の行へ回る。
+   幅は常に等分のままなので、最終行だけボタンが伸びる不格好にもならない。
+   5日なら1行（従来と同じ見た目）、10日なら2行、20日なら4行と素直に伸びる。
+
+   最小幅 44px は `8/19` が 13px/600 で潰れない実測値。 */
+#day-seg {
+  grid-auto-flow: row;
+  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+}
+
 /* 未取得の時間帯がある日は下線で示す */
 .seg button.is-partial::after {
   content: '';
