@@ -20,9 +20,9 @@ on:
   workflow_dispatch:
     inputs:
       hours:
-        description: '遡る時間（既定 3。配信保持は約120時間まで）'
+        description: '遡る時間（既定 120＝配信に残っている全部。これより前は取れない）'
         required: false
-        default: '3'
+        default: '120'
       commit_archive:
         description: 'アーカイブをコミットする'
         type: boolean
@@ -51,14 +51,28 @@ jobs:
         with:
           python-version: '3.12'
 
+      # **既定は配信に残っている 5 日ぶん全部（120時間）。**
+      # 短い窓にすると「Actions を回したのに直近5日になっていない」になる。
+      # 配信は約5日で消えるので、ここで取らなかったぶんは永久に欠ける。
+      # 1スライスあたり request_interval_sec(0.4秒) 空けるので、
+      # まっさらから 5 日ぶん（1,440スライス）だと収集だけで 15 分ほどかかる。
+      # 既に持っているスライスは飛ばすので、続けて回すぶんには数十秒で終わる。
+      #
+      # `inputs.hours` は schedule 実行では空になる。素で埋め込むと
+      # `print(/24)` になって落ちるので、既定値を後ろに置いておく。
+      - name: 収集の窓を決める
+        run: echo "WINDOW_DAYS=$(python -c "print(${{ inputs.hours || '120' }}/24)")" >> "$GITHUB_ENV"
+
       - name: 収集（未取得スライスのみ）
-        run: python scripts/collect.py --window-days "$(python -c "print(${{ inputs.hours }}/24)")"
+        run: python scripts/collect.py --window-days "$WINDOW_DAYS"
 
       - name: アーカイブへ投入
         run: python scripts/normalize.py
 
+      # 点検も**収集と同じ窓**で出す。config の window_days(4日) のままだと、
+      # いま取りに行った5日目が「窓外」に出て報告が食い違う。
       - name: カバレッジ点検
-        run: python scripts/status.py
+        run: python scripts/status.py --window-days "$WINDOW_DAYS"
 
       - name: アーカイブをコミット
         if: ${{ inputs.commit_archive }}
