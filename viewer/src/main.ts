@@ -92,8 +92,28 @@ function dayRange(): [number, number] {
   return [start, start + MINUTES_PER_DAY * 60 * 1000]
 }
 
+/**
+ * PMTiles の URL。**内容が変わったことが分かる版数を付ける。**
+ *
+ * ファイル名は `liden_YYYYMMDD.pmtiles` で固定なのに、同じ日を後から
+ * 追加収集すると中身だけが差し替わる。GitHub Pages は
+ * `Cache-Control: max-age=600` を返すので、版数を付けないと
+ * **新旧のアーカイブのバイト範囲が混ざる。** PMTiles はレンジ取得なので、
+ * ヘッダ／ディレクトリだけ古いキャッシュから来るとオフセットがずれて
+ * 「地図は出るが落雷が出ない・欠ける」形で壊れる。
+ *
+ * 版数は `slices`-`bytes`（build.py が書く実測値）にする。中身が変わった
+ * ときだけ変わるので、変わっていない日のタイルはキャッシュが効いたままになる。
+ * デプロイ時刻のような全日共通の値にすると、1日ぶん増えただけで
+ * 全日を再ダウンロードさせてしまう。
+ *
+ * クエリを足しても pmtiles の Protocol は壊れない。タイル URL の解析は
+ * `/pmtiles:\/\/(.+)\/(\d+)\/(\d+)\/(\d+)/` の**貪欲**マッチなので、
+ * `/` を含まないクエリは末尾の z/x/y と取り違えられない。
+ */
 function tileUrl(day: DayEntry): string {
-  return PMTILES_BASE + '/' + (day.pmtiles ?? 'liden_' + day.date + '.pmtiles')
+  const name = day.pmtiles ?? 'liden_' + day.date + '.pmtiles'
+  return PMTILES_BASE + '/' + name + '?v=' + day.slices + '-' + (day.bytes ?? 0)
 }
 
 // ---- 描画の更新 ----
@@ -278,7 +298,12 @@ function applyTheme(theme: Theme): void {
 // ---- 起動 ----
 
 async function boot(): Promise<void> {
-  const res = await fetch(PMTILES_BASE + '/index.json')
+  // index.json はファイル名が固定なのに毎回中身が変わる。GitHub Pages の
+  // `max-age=600` に任せると、Actions を回した直後でも**古い日付一覧が最大10分**
+  // 出続ける（実際に踏んだ: 収集もタイル生成もデプロイも成功しているのに
+  // ビューアの日付だけ増えない）。索引だけは必ずサーバに取りに行く。
+  // 実体の PMTiles 側は `tileUrl()` の版数でキャッシュを切る。
+  const res = await fetch(PMTILES_BASE + '/index.json', { cache: 'no-store' })
   if (!res.ok) {
     document.body.innerHTML =
       '<p style="padding:24px;font:14px system-ui">' +
