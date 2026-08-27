@@ -9,7 +9,13 @@
   窓より短い間隔（既定は6時間ごと）で回せば取りこぼさない。
 
 このスクリプトは毎回「窓の中の全 basetime」を列挙し、**未取得のものだけ**取る。
-一度保存したスライスは二度と取り直さない（raw は不変のアーカイブ）。
+一度保存したスライスは二度と取り直さない。
+
+**取得済みかどうかの一次情報は `archive/manifest.json` のビットマップ。**
+`data/raw/` の有無だけで判定すると、raw を掃除した後（`prune.py`）や
+`data/raw/` が無い環境（CI は毎回まっさら）で**窓のぶんを丸ごと取り直す**。
+窓が5日なら 1,440 スライス＝15分＋気象庁へ1,440リクエストになる。
+raw / `.miss` の有無も併せて見るのは、normalize 前の取得済みを二重取りしないため。
 
 空スライス（雷が無かった5分）も `{"type":"FeatureCollection","features":[]}` として
 保存する。**「取得済みで雷なし」と「未取得」を区別できないと、
@@ -33,13 +39,27 @@ from common import (
     basetime_dt,
     iter_basetimes,
     load_config,
+    load_manifest,
     miss_path,
     now_utc,
     parse_obstime,
     raw_path,
+    slice_day_index,
 )
 
 USER_AGENT = "jma-liden-tile-pipeline/0.1 (+https://github.com/shiwaku/jma-liden-tile-pipeline)"
+
+
+def archived(manifest: dict, basetime: str) -> bool:
+    """そのスライスが既にアーカイブに入っているか。
+
+    **枠番は normalize.py と同じ `slice_day_index` で出す。** ここで別の
+    数え方をすると、1枠ずれて「毎回1スライスだけ取り直す」ような壊れ方をする。
+    ビットマップが短い（古い manifest）場合は未取得として扱う。
+    """
+    date, index = slice_day_index(basetime)
+    coverage = manifest.get("days", {}).get(date, {}).get("coverage", "")
+    return index < len(coverage) and coverage[index] == "1"
 
 
 def fetch_slice(url: str, timeout: int, retries: int) -> tuple[int, dict | None]:
@@ -125,6 +145,8 @@ def main() -> int:
                         help="1回で取得する最大スライス数")
     parser.add_argument("--dry-run", action="store_true",
                         help="取得せず、未取得スライス数だけ数える")
+    parser.add_argument("--refetch", action="store_true",
+                        help="アーカイブ済みでも取り直す（manifest を疑うときの逃げ道）")
     args = parser.parse_args()
 
     config = load_config()
@@ -132,11 +154,21 @@ def main() -> int:
     window = args.window_days if args.window_days is not None else col["window_days"]
     limit = args.max_slices if args.max_slices is not None else col["max_slices_per_run"]
 
-    targets = [
-        bt for bt in iter_basetimes(now_utc(), window, src["interval_minutes"])
-        if not raw_path(bt).exists() and not miss_path(bt).exists()
-    ]
-    print(f"窓 {window} 日 / 未取得 {len(targets)} スライス", flush=True)
+    # **一次情報は manifest のビットマップ。** raw / .miss はその手前の
+    # 「取ったが normalize 前」を二重取りしないための補助。
+    manifest = {"days": {}} if args.refetch else load_manifest()
+    targets = []
+    skipped = 0
+    for bt in iter_basetimes(now_utc(), window, src["interval_minutes"]):
+        if archived(manifest, bt):
+            skipped += 1
+            continue
+        if raw_path(bt).exists() or miss_path(bt).exists():
+            skipped += 1
+            continue
+        targets.append(bt)
+    note = f"（アーカイブ済み等 {skipped:,} を除外）" if skipped else ""
+    print(f"窓 {window} 日 / 未取得 {len(targets)} スライス{note}", flush=True)
     if args.dry_run:
         for bt in targets[:20]:
             print(f"  [TODO] {bt}")
