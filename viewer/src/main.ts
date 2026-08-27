@@ -47,6 +47,19 @@ const PMTILES_BASE = (() => {
  * 5分という単位は「配信スライスのカバレッジ（288枠）」の話であって、
  * 表示の時間解像度とは別物。混ぜないこと。
  */
+/**
+ * 日付タブに出す日数。**配信保持（約5日）に合わせて5日。**
+ *
+ * これは「取りに行く窓」ではなく「見せる窓」。収集の窓は
+ * `.github/workflows/collect.yml` の `hours` と `config/pipeline.json` の
+ * `collect.window_days` 側にあり、こことは別物なので混ぜないこと。
+ *
+ * **絞るのは表示だけで、アーカイブは絞らない。** `archive/` は一次資産で、
+ * ここに入った日は配信から消えても復元できる唯一の控えになる。
+ * この定数を大きくすれば、過去に集めた日はそのまま出てくる。
+ */
+const VISIBLE_DAYS = 5
+
 const MINUTES_PER_DAY = 24 * 60
 
 // 背景地図(pmtiles://)と落雷タイル(pmtiles://)の両方で必要
@@ -311,7 +324,11 @@ async function boot(): Promise<void> {
     return
   }
   const index: Index = await res.json()
-  const days = index.days.filter((d) => d.count > 0)
+  // 日付タブに出すのは**直近 VISIBLE_DAYS 日ぶんだけ**。
+  // archive/ は消さないので index.json には集めた日が全部載る。
+  // 全部出すとタブが際限なく増えるので、**表示だけ**を末尾から絞る。
+  // archive/ も dist/ も完全なままなので、ここを外せばいつでも全日出せる。
+  const days = index.days.filter((d) => d.count > 0).slice(-VISIBLE_DAYS)
   if (days.length === 0) {
     document.body.innerHTML = '<p style="padding:24px;font:14px system-ui">落雷データが空。</p>'
     return
