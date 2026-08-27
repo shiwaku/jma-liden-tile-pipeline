@@ -21,7 +21,27 @@ export interface Index {
   days: DayEntry[]
 }
 
-export const SOURCE_ID = 'liden'
+/**
+ * 落雷レイヤーは **2枚組（スロット）** で持つ。
+ *
+ * タイルは日ごとに分かれているので、通し再生では真夜中でソースを差し替える。
+ * 1枚しか無いと「消す→足す→読み終わるまで空」で**一瞬落雷が消える**。
+ * 表と裏を用意し、**裏で読み終わってから表を入れ替える**ことで空白を無くす。
+ *
+ * id は基底名 + スロット（`liden-core-a`）。スロットが違えば別レイヤーなので、
+ * 2日ぶんを同時に地図へ載せておける。
+ */
+export type Slot = 'a' | 'b'
+
+export const SLOTS: Slot[] = ['a', 'b']
+
+export function sourceId(slot: Slot): string {
+  return 'liden-' + slot
+}
+
+export function layerId(base: string, slot: Slot): string {
+  return base + '-' + slot
+}
 
 /**
  * 発光は **3層の円を重ねて**作る。ぼかした大きい円で光をにじませ、
@@ -51,10 +71,10 @@ export const GLOW_LAYERS: Array<{
   { id: 'liden-core', radius: [[3, 2], [7, 3], [12, 5]], blur: 0, base: 1, color: 'white' },
 ]
 
-/** 当たり判定に使う層。いちばん大きいので拾いやすい。 */
-export const PICK_LAYER = 'liden-glow'
-/** 件数を数える層。芯なので画面端で余分に拾わない。 */
-export const COUNT_LAYER = 'liden-core'
+/** 当たり判定に使う層の基底名。いちばん大きいので拾いやすい。 */
+export const PICK_LAYER_BASE = 'liden-glow'
+/** 件数を数える層の基底名。芯なので画面端で余分に拾わない。 */
+export const COUNT_LAYER_BASE = 'liden-core'
 
 /**
  * 残光の配色。新しい落雷ほど明るく、時間が経つほど沈む。
@@ -160,14 +180,19 @@ function radiusExpr(stops: Array<[number, number]>): ExpressionSpecification {
   return ['interpolate', ['linear'], ['zoom'], ...stops.flat()] as ExpressionSpecification
 }
 
-/** 落雷レイヤー（発光3層）を追加する。 */
-export function addLidenLayers(map: MLMap, url: string, layerName: string): void {
-  map.addSource(SOURCE_ID, { type: 'vector', url: `pmtiles://${url}` })
+/**
+ * 落雷レイヤー（発光3層）を1スロットぶん追加する。
+ *
+ * **`circle-opacity` は 0 で入る。** 足した瞬間に見えてしまうと、裏で先読み
+ * している日が表に重なる。見せるのは `refreshLayers` が塗ったときだけ。
+ */
+export function addLidenLayers(map: MLMap, slot: Slot, url: string, layerName: string): void {
+  map.addSource(sourceId(slot), { type: 'vector', url: `pmtiles://${url}` })
   for (const s of GLOW_LAYERS) {
     map.addLayer({
-      id: s.id,
+      id: layerId(s.id, slot),
       type: 'circle',
-      source: SOURCE_ID,
+      source: sourceId(slot),
       'source-layer': layerName,
       paint: {
         'circle-color': s.color === 'white' ? '#ffffff' : '#ffc247',
@@ -180,11 +205,12 @@ export function addLidenLayers(map: MLMap, url: string, layerName: string): void
   }
 }
 
-export function removeLidenLayers(map: MLMap): void {
+export function removeLidenLayers(map: MLMap, slot: Slot): void {
   for (const s of GLOW_LAYERS) {
-    if (map.getLayer(s.id)) map.removeLayer(s.id)
+    const id = layerId(s.id, slot)
+    if (map.getLayer(id)) map.removeLayer(id)
   }
-  if (map.getSource(SOURCE_ID)) map.removeSource(SOURCE_ID)
+  if (map.getSource(sourceId(slot))) map.removeSource(sourceId(slot))
 }
 
 export function legendHtml(windowMinutes: number): string {

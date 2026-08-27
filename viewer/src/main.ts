@@ -9,15 +9,19 @@ import {
   addLidenLayers,
   ageColor,
   ageOpacity,
-  COUNT_LAYER,
+  COUNT_LAYER_BASE,
   GLOW_LAYERS,
   groupTypes,
+  layerId,
   legendHtml,
-  PICK_LAYER,
+  PICK_LAYER_BASE,
   removeLidenLayers,
+  SLOTS,
+  sourceId,
   typeFilter,
   type DayEntry,
   type Index,
+  type Slot,
 } from './layers'
 
 /**
@@ -88,6 +92,10 @@ interface State {
   activeTypes: Set<number>
   playing: boolean
   theme: Theme
+  /** いま表に出しているスロット。もう一方は先読み／前日の残光用 */
+  slot: Slot
+  /** 各スロットに載っている日（YYYYMMDD）。未ロードは null */
+  slotDate: Record<Slot, string | null>
 }
 
 let map: MLMap
@@ -171,18 +179,69 @@ function tileUrl(day: DayEntry): string {
  * `setFilter` はタイルの再評価を起こすので再生ループでは触らない
  * （種別の切替だけが filter を触る → `refreshFilter()`）。
  */
+/** 表のスロットの層 id。 */
+function activeLayer(base: string): string {
+  return layerId(base, state.slot)
+}
+
+/** 表と裏を入れ替えた側のスロット。 */
+function otherSlot(): Slot {
+  return state.slot === 'a' ? 'b' : 'a'
+}
+
+/** 表示中の時刻窓 [from, cursor]。「1日ぶんすべて」はその日の 00:00 起点。 */
+function visibleRange(): [number, number] {
+  const cursor = cursorMs()
+  const windowMs = state.windowMinutes * 60 * 1000
+  return [windowMs <= 0 ? dayRange()[0] : cursor - windowMs, cursor]
+}
+
+/** その日のタイルが時刻窓に掛かるか。 */
+function dayIntersects(date: string, from: number, to: number): boolean {
+  const start = dayStartMs(date)
+  return start < to && start + MINUTES_PER_DAY * 60 * 1000 > from
+}
+
+/** 塗っているスロットの層 id（存在するものだけ）。クリックも件数もこれで揃える。 */
+function paintedLayers(base: string): string[] {
+  return paintedSlots()
+    .map((slot) => layerId(base, slot))
+    .filter((id) => map.getLayer(id))
+}
+
+/** いま塗るべきスロット（＝時刻窓に掛かる日を載せているスロット）。 */
+function paintedSlots(): Slot[] {
+  const [from, to] = visibleRange()
+  return SLOTS.filter((slot) => {
+    const date = state.slotDate[slot]
+    return date !== null && dayIntersects(date, from, to)
+  })
+}
+
 function refreshLayers(): void {
-  if (!map.getLayer(COUNT_LAYER)) return
+  if (!map.getLayer(activeLayer(COUNT_LAYER_BASE))) return
   const cursor = cursorMs()
   const windowMs = state.windowMinutes * 60 * 1000
   const color = ageColor(cursor, windowMs)
+  // **時刻窓に掛かるスロットは全部塗る。** 真夜中の直後は残光が前日に伸びるので、
+  // 表（新しい日）だけ塗ると 00:00 から残光ぶんのあいだ画面が空になる
+  // （5分/コマなら 30分ぶん＝6コマ、「一瞬消えた」に見える）。
+  const on = new Set(paintedSlots())
 
-  for (const s of GLOW_LAYERS) {
-    // 芯を白にするのはダークのときだけ。**ライトの淡色地図では白は背景に溶ける**ので、
-    // 芯にも経過時間の色を載せて点を見えるようにする。
-    const c = s.color === 'white' && state.theme === 'light' ? color : (s.color === 'white' ? '#ffffff' : color)
-    map.setPaintProperty(s.id, 'circle-color', c)
-    map.setPaintProperty(s.id, 'circle-opacity', ageOpacity(cursor, windowMs, s.base))
+  for (const slot of SLOTS) {
+    for (const s of GLOW_LAYERS) {
+      const id = layerId(s.id, slot)
+      if (!map.getLayer(id)) continue
+      if (!on.has(slot)) {
+        map.setPaintProperty(id, 'circle-opacity', 0)
+        continue
+      }
+      // 芯を白にするのはダークのときだけ。**ライトの淡色地図では白は背景に溶ける**ので、
+      // 芯にも経過時間の色を載せて点を見えるようにする。
+      const c = s.color === 'white' && state.theme === 'light' ? color : (s.color === 'white' ? '#ffffff' : color)
+      map.setPaintProperty(id, 'circle-color', c)
+      map.setPaintProperty(id, 'circle-opacity', ageOpacity(cursor, windowMs, s.base))
+    }
   }
 
   updateClock()
@@ -190,11 +249,70 @@ function refreshLayers(): void {
 }
 
 /**
+ * ソースが読み終わるまで待つ。**保険のタイムアウト付き。**
+ *
+ * `sourcedata` が期待どおり飛ばないケース（タイルが1枚も無い日など）で
+ * 永久に待たないようにする。待てなかったら諦めて先へ進むだけなので、
+ * 最悪でも「元の一瞬消える挙動」に戻るだけで固まりはしない。
+ */
+function whenSourceLoaded(id: string, timeoutMs = 4000): Promise<void> {
+  if (!map.getSource(id)) return Promise.resolve()
+  if (map.isSourceLoaded(id)) return Promise.resolve()
+  return new Promise<void>((resolve) => {
+    const done = (): void => {
+      map.off('sourcedata', onData)
+      window.clearTimeout(timer)
+      resolve()
+    }
+    const onData = (e: { sourceId?: string }): void => {
+      if (e.sourceId === id && map.isSourceLoaded(id)) done()
+    }
+    const timer = window.setTimeout(done, timeoutMs)
+    map.on('sourcedata', onData)
+  })
+}
+
+/**
+ * 何分前から次の日を裏へ積み始めるか（シミュレーション時間）。
+ * 5分/コマ・120ms なら 120分 ＝ 24コマ ≒ 2.9 秒ぶんの猶予になる。
+ */
+const PRELOAD_LEAD_MINUTES = 120
+
+/** 裏のスロットにその日を載せる（すでに載っていれば何もしない）。 */
+function loadIntoBack(day: DayEntry): Slot {
+  const back = otherSlot()
+  if (state.slotDate[back] === day.date) return back
+  removeLidenLayers(map, back)
+  addLidenLayers(map, back, tileUrl(day), state.index.layer)
+  state.slotDate[back] = day.date
+  refreshFilter()
+  return back
+}
+
+/**
+ * 真夜中が近づいたら次の日を裏へ積む。**早すぎると前日を追い出してしまう。**
+ *
+ * 昇格した直後の裏には**前日**が載っていて、それが真夜中をまたぐ残光を
+ * 描いている。次の日をすぐ積むとそれを上書きしてしまうので、境界の
+ * PRELOAD_LEAD_MINUTES 前になるまで待つ。
+ */
+function maybePreloadNext(): void {
+  const i = dayIndexAt(state.minute)
+  const toBoundary = (i + 1) * MINUTES_PER_DAY - state.minute
+  if (toBoundary > PRELOAD_LEAD_MINUTES) return
+  const next = state.index.days[i + 1]
+  if (next) loadIntoBack(next)
+}
+
+/**
  * カーソルが別の日のレーンに入ったらタイルを差し替える。
  *
  * タイルは日ごとに分かれているので、通しで再生すると真夜中でソースを
- * 貼り替える必要がある。**毎コマ呼ばれるので、日が変わっていなければ即戻る**こと
- * （`addLidenLayers` はソースの作り直しで重い）。
+ * 貼り替える必要がある。**毎コマ呼ばれるので、日が変わっていなければ即戻る**こと。
+ *
+ * **消してから足すと、読み終わるまで落雷が一瞬消える。** 表と裏の2スロットを
+ * 持ち、裏で読み終わってから表に昇格させる。次の日は境界に着く前に裏へ
+ * 先読みしておくので、真夜中の入れ替えは待ち時間ゼロで済む。
  *
  * ここでは `fitBounds` しない。再生中に真夜中を越えるたび地図が飛ぶのは邪魔なので、
  * 画面を合わせるのは日付タブを押したとき（`jumpToDay`）だけにする。
@@ -204,13 +322,24 @@ function refreshLayers(): void {
  */
 function syncDay(): void {
   const day = dayAt(state.minute)
-  if (day.date === state.day.date) return
-  state.day = day
-  removeLidenLayers(map)
-  addLidenLayers(map, tileUrl(day), state.index.layer)
-  refreshFilter()
-  markSelectedDay()
-  updateDayNote()
+  if (day.date === state.day.date) {
+    maybePreloadNext()
+    return
+  }
+
+  // 裏に載っていなければ（＝スライダーで遠くへ飛んだ）いま載せる。
+  // **表はまだ消さない。** 読み終わるまで前の日を出しておく。
+  const back = loadIntoBack(day)
+  void whenSourceLoaded(sourceId(back)).then(() => {
+    // 待っている間にさらに日が変わっていたら、そのときの sync に任せる
+    if (dayAt(state.minute).date !== day.date) return
+    state.day = day
+    state.slot = back
+    // 旧スロットはそのまま残す。**真夜中をまたぐ残光をそれが描く。**
+    markSelectedDay()
+    updateDayNote()
+    refreshLayers()
+  })
 }
 
 /** カーソルを動かし、スライダー・タイル・描画をまとめて追従させる。 */
@@ -222,10 +351,19 @@ function setMinute(minute: number): void {
 }
 
 /** 種別の絞り込み。トグル操作のときだけ呼ぶ。 */
+/**
+ * 種別の絞り込み。トグル操作のときだけ呼ぶ。
+ * **裏のスロットにも掛ける。** 掛け忘れると、真夜中で表に出た瞬間に
+ * 消したはずの種別が復活する。
+ */
 function refreshFilter(): void {
-  if (!map.getLayer(COUNT_LAYER)) return
   const filter = typeFilter(state.activeTypes)
-  for (const s of GLOW_LAYERS) map.setFilter(s.id, filter)
+  for (const slot of SLOTS) {
+    for (const s of GLOW_LAYERS) {
+      const id = layerId(s.id, slot)
+      if (map.getLayer(id)) map.setFilter(id, filter)
+    }
+  }
 }
 
 /** 通しのタイムラインなので、時刻だけでは何日目か分からない。**必ず日付も出す。** */
@@ -250,17 +388,41 @@ function mmdd(day: DayEntry): string {
  *   ここで JS 側で絞る（filter に時刻を入れていないため）
  */
 function updateVisibleCount(): void {
-  if (!map.getLayer(COUNT_LAYER) || !map.isStyleLoaded()) return
-  const cursor = cursorMs()
-  const windowMs = state.windowMinutes * 60 * 1000
-  const from = windowMs <= 0 ? dayRange()[0] : cursor - windowMs
+  if (!map.isStyleLoaded()) return
+  // 塗っているスロット全部から数える。真夜中をまたぐ残光は2日ぶんに散るので、
+  // 表だけ数えると件数が実際より少なく出る。
+  const layers = paintedLayers(COUNT_LAYER_BASE)
+  if (layers.length === 0) return
+  const [from, cursor] = visibleRange()
   const ids = new Set<string>()
-  for (const f of map.queryRenderedFeatures({ layers: [COUNT_LAYER] })) {
+  for (const f of map.queryRenderedFeatures({ layers })) {
     const p = f.properties ?? {}
     const e = p.epoch_ms as number
     if (e > from && e <= cursor) ids.add(p.src_id as string)
   }
   $('visible-count').textContent = ids.size.toLocaleString('ja-JP') + ' 件'
+}
+
+/**
+ * その位置で拾える落雷のうち、**いま見えているもの**を1件返す。
+ *
+ * `queryRenderedFeatures` は**不透明度0の点も「描画済み」として返す**ので、
+ * そのまま先頭を採ると「光っていない別の時刻の落雷」の内容が出る
+ * （実際に踏んだ: 15:00 を見ているのに 17:45 の点が返ってきた）。
+ * 時刻窓で絞ってから、**いちばん新しい＝いちばん明るい**ものを選ぶ。
+ */
+function pickAt(point: maplibregl.Point): maplibregl.MapGeoJSONFeature | null {
+  const layers = paintedLayers(PICK_LAYER_BASE)
+  if (layers.length === 0) return null
+  const [from, cursor] = visibleRange()
+  let best: maplibregl.MapGeoJSONFeature | null = null
+  let bestMs = -Infinity
+  for (const f of map.queryRenderedFeatures(point, { layers })) {
+    const e = (f.properties ?? {}).epoch_ms as number
+    if (!(e > from && e <= cursor)) continue
+    if (e > bestMs) { bestMs = e; best = f }
+  }
+  return best
 }
 
 // ---- 再生 ----
@@ -410,7 +572,11 @@ function applyTheme(theme: Theme): void {
   $('theme-btn').textContent = theme === 'dark' ? '☀' : '☾'
   map.setStyle(getBasemapStyle(theme), { diff: false })
   map.once('styledata', () => {
-    addLidenLayers(map, tileUrl(state.day), state.index.layer)
+    // スタイルを差し替えるとソースごと消えるので、**表だけ**載せ直す。
+    // 裏は次に日が変わるとき（syncDay / maybePreloadNext）に積み直される。
+    addLidenLayers(map, state.slot, tileUrl(state.day), state.index.layer)
+    state.slotDate = { a: null, b: null }
+    state.slotDate[state.slot] = state.day.date
     refreshFilter()
     refreshLayers()
   })
@@ -466,6 +632,8 @@ async function boot(): Promise<void> {
     ),
     playing: false,
     theme,
+    slot: 'a',
+    slotDate: { a: latest.date, b: null },
   }
   applyThemeAttr(theme)
 
@@ -528,9 +696,15 @@ async function boot(): Promise<void> {
 
   // クリックで1件の内容を見る
   const tooltip = $('tooltip')
-  map.on('click', PICK_LAYER, (e) => {
-    const f = e.features?.[0]
-    if (!f) return
+  // **レイヤー指定でイベントを張らない。** 表のスロットは真夜中で入れ替わるので、
+  // id を固定して張ると入れ替わった側で拾えなくなる。地図全体で受けて、
+  // そのとき塗っているスロット全部に問い合わせる。
+  map.on('click', (e) => {
+    const f = pickAt(e.point)
+    if (!f) {
+      tooltip.hidden = true
+      return
+    }
     const p = f.properties ?? {}
     tooltip.hidden = false
     tooltip.style.left = (e.point.x + 12) + 'px'
@@ -539,12 +713,13 @@ async function boot(): Promise<void> {
       '<strong>' + String(p.obstime ?? '').replace('T', ' ').slice(0, 23) + '</strong><br />' +
       'type ' + p.type + ' / 配信スライス ' + p.slice
   })
-  map.on('click', (e) => {
-    const hits = map.queryRenderedFeatures(e.point, { layers: [PICK_LAYER] })
-    if (hits.length === 0) tooltip.hidden = true
+  map.on('mousemove', (e) => {
+    const pick = activeLayer(PICK_LAYER_BASE)
+    const on = map.getLayer(pick)
+      ? map.queryRenderedFeatures(e.point, { layers: [pick] }).length > 0
+      : false
+    map.getCanvas().style.cursor = on ? 'pointer' : ''
   })
-  map.on('mouseenter', PICK_LAYER, () => { map.getCanvas().style.cursor = 'pointer' })
-  map.on('mouseleave', PICK_LAYER, () => { map.getCanvas().style.cursor = '' })
   map.on('moveend', updateVisibleCount)
   // タイルの読み込みが終わるまで queryRenderedFeatures は空を返す。
   // refreshLayers の直後に数えるだけでは 0 のままになるので idle で数え直す。
@@ -556,7 +731,7 @@ async function boot(): Promise<void> {
   slider.value = String(startMinute)
 
   await new Promise<void>((resolve) => map.once('load', () => resolve()))
-  addLidenLayers(map, tileUrl(latest), index.layer)
+  addLidenLayers(map, 'a', tileUrl(latest), index.layer)
   buildSliderScale()
   buildDaySeg()
   buildTypeToggles()
