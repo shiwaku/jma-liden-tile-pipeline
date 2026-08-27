@@ -22,7 +22,9 @@ MapLibre のタイムラプスで見る。雷雨のときに手で叩いて最�
 
 雷雨に気づいたら Actions の **`collect liden`** を `Run workflow` するだけ。
 取得 → アーカイブのコミット → PMTiles 生成 → **公開サイトの更新**まで通る。
-`hours` で遡る時間を指定できる（既定3）。スマホのブラウザからでも実行できる。
+既定で**配信に残っている 5 日ぶん全部**（`hours` = 120）を取りに行くので、
+しばらく回していなくても直近5日が揃う。`hours` を縮めれば短く済ませられる。
+スマホのブラウザからでも実行できる。
 
 [![Run workflow](https://img.shields.io/badge/Actions-collect%20liden-2088FF?logo=githubactions&logoColor=white)](https://github.com/shiwaku/jma-liden-tile-pipeline/actions/workflows/collect.yml)
 
